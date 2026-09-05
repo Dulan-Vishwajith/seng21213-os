@@ -24,7 +24,11 @@
 #include "vga.h"
 #include "keyboard.h"
 #include "../include/types.h"
-
+#include "process.h"
+#include "scheduler.h"
+#include "thread.h"
+#include "mutex.h"
+#include "semaphore.h"
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
@@ -33,6 +37,9 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_mem(void);
+static void cmd_ps(void);
+static void cmd_kill(const char *args);
+static void cmd_sched(void);
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -52,6 +59,19 @@ static size_t k_strlen(const char *s) {
     while (s[n]) n++;
     return n;
 }
+
+static int k_atoi(const char *s) {
+    int value = 0;
+
+    while (*s >= '0' && *s <= '9') {
+        value = value * 10 + (*s - '0');
+        s++;
+    }
+
+    return value;
+}
+
+
 
 /* Skip leading spaces */
 static const char *k_ltrim(const char *s) {
@@ -123,6 +143,7 @@ static void cmd_help(void) {
     vga_puts("  free    – [L11] Show free memory\n");
     vga_puts("  ls      – [L12] List files\n");
     vga_puts("  cat     – [L12] Print file contents\n\n");
+    vga_puts("  sched  - Run scheduler\n");
 }
 
 static void cmd_clear(void) {
@@ -159,6 +180,128 @@ static void cmd_mem(void) {
                    VGA_YELLOW, VGA_BLACK);
 }
 
+
+
+static void k_print_uint(uint32_t n) {
+    char buffer[11];
+    int i = 0;
+
+    if (n == 0) {
+        vga_puts("0");
+        return;
+    }
+
+    while (n > 0) {
+        buffer[i++] = (char)('0' + (n % 10));
+        n /= 10;
+    }
+
+    while (i > 0) {
+        vga_putchar(buffer[--i]);
+    }
+}
+
+
+
+
+
+static void cmd_sched(void)
+{
+    int current;
+
+    scheduler_schedule();
+    current = scheduler_get_current();
+
+    if (current >= 0) {
+        vga_puts_color("Scheduled PID: ", VGA_LIGHT_GREEN, VGA_BLACK);
+        vga_printf("%d\n", process_table[current].pid);
+    } else {
+        vga_puts_color("No READY process found.\n",
+                       VGA_LIGHT_RED, VGA_BLACK);
+    }
+}
+
+
+
+static void cmd_ps(void) {
+    int i;
+
+    vga_puts_color("\nPID    STATE       TICKS\n",
+                   VGA_LIGHT_CYAN, VGA_BLACK);
+
+    vga_puts("-----------------------------\n");
+
+    for (i = 0; i < MAX_PROCESSES; i++) {
+
+        if (process_table[i].state != PROCESS_UNUSED) {
+
+            /* Print PID */
+            k_print_uint(process_table[i].pid);
+
+            vga_puts("      ");
+
+            /* Print process state */
+            if (process_table[i].state == PROCESS_READY) {
+                vga_puts_color("READY", VGA_LIGHT_GREEN, VGA_BLACK);
+            }
+            else if (process_table[i].state == PROCESS_RUNNING) {
+                vga_puts_color("RUNNING", VGA_LIGHT_CYAN, VGA_BLACK);
+            }
+            else if (process_table[i].state == PROCESS_TERMINATED) {
+                vga_puts_color("TERMINATED", VGA_LIGHT_RED, VGA_BLACK);
+            }
+
+            vga_puts("       ");
+
+            /* Print ticks */
+            k_print_uint(process_table[i].ticks);
+
+            vga_puts("\n");
+        }
+    }
+
+    vga_puts("\n");
+}
+
+
+
+static void cmd_kill(const char *args) {
+    int pid;
+
+    args = k_ltrim(args);
+
+    if (k_strlen(args) == 0) {
+        vga_puts_color(
+            "Usage: kill <pid>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    pid = k_atoi(args);
+
+    if (pid <= 0) {
+        vga_puts_color(
+            "Invalid PID.\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    process_terminate(pid);
+
+    vga_puts_color(
+        "Process terminated.\n",
+        VGA_LIGHT_GREEN,
+        VGA_BLACK
+    );
+}
+
+
+
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -188,10 +331,26 @@ static void shell_run(void) {
             continue;
         }
 
+if (k_strcmp(cmd, "ps") == 0) {
+    cmd_ps();
+    continue;
+}
+
+
+if (k_strncmp(cmd, "kill ", 5) == 0) {
+    cmd_kill(cmd + 5);
+    continue;
+}
+
+if (k_strcmp(cmd, "sched") == 0) {
+    cmd_sched();
+    continue;
+}
+
+
+
         /* Milestone stubs */
-        if (k_strcmp(cmd, "ps")      == 0 ||
-            k_strcmp(cmd, "kill")    == 0 ||
-            k_strcmp(cmd, "threads") == 0 ||
+        if (k_strcmp(cmd, "threads") == 0 ||
             k_strcmp(cmd, "free")    == 0 ||
             k_strcmp(cmd, "ls")      == 0 ||
             k_strcmp(cmd, "cat")     == 0) {
@@ -205,7 +364,30 @@ static void shell_run(void) {
         vga_puts(cmd);
         vga_puts("\n  Type 'help' for a list of commands.\n");
     }
+
 }
+
+
+
+
+
+
+
+
+static void process_one(void) {
+    while (1) {
+        asm volatile("hlt");
+    }
+}
+
+static void process_two(void) {
+    while (1) {
+        asm volatile("hlt");
+    }
+}
+
+
+
 
 /* ---------------------------------------------------------------------------
  * Kernel entry point – called from kernel_entry.asm
@@ -213,6 +395,13 @@ static void shell_run(void) {
 void kernel_main(void) {
     vga_init();
     kb_init();
+    process_init();
+
+process_create(process_one);
+process_create(process_two);
+
+    scheduler_init();
+    thread_init();
     print_splash();
     shell_run();
 
