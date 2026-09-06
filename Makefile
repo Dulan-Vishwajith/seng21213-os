@@ -50,14 +50,16 @@ KERNEL_ASM_SRCS := kernel/kernel_entry.asm \
 
 KERNEL_ASM_OBJS := $(patsubst kernel/%.asm, build/%.o, $(KERNEL_ASM_SRCS))
 
-
 KERNEL_C_SRCS := kernel/kernel.c \
                  kernel/vga.c \
                  kernel/keyboard.c \
                  kernel/process.c \
                  kernel/scheduler.c \
-                 kernel/idt.c
-
+                 kernel/idt.c \
+                 kernel/thread.c \
+                 kernel/mutex.c \
+                 kernel/semaphore.c\
+		 kernel/pmm.c
 
 # Add your new source files below as the course progresses:
 # Lecture 09: kernel/process.c kernel/scheduler.c

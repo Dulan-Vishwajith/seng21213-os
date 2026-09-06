@@ -29,6 +29,7 @@
 #include "thread.h"
 #include "mutex.h"
 #include "semaphore.h"
+#include "pmm.h"
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
@@ -37,6 +38,7 @@ static void cmd_clear(void);
 static void cmd_about(void);
 static void cmd_echo(const char *args);
 static void cmd_mem(void);
+static void cmd_meminfo(void);
 static void cmd_ps(void);
 static void cmd_kill(const char *args);
 static void cmd_sched(void);
@@ -136,6 +138,7 @@ static void cmd_help(void) {
     vga_puts("  about   – About this OS and course\n");
     vga_puts("  echo    – Echo text to screen\n");
     vga_puts("  mem     – Memory map (stub)\n");
+    vga_puts("  meminfo - Show physical memory information\n");
     vga_puts_color("\n  Milestones (to implement):\n", VGA_LIGHT_CYAN, VGA_BLACK);
     vga_puts("  ps      – [L09] List processes\n");
     vga_puts("  kill    – [L09] Terminate a process\n");
@@ -201,6 +204,33 @@ static void k_print_uint(uint32_t n) {
     }
 }
 
+static void cmd_meminfo(void)
+{
+    uint32_t total;
+    uint32_t free;
+    uint32_t used;
+
+    total = pmm_total_frames();
+    free = pmm_free_frames();
+    used = total - free;
+
+    vga_puts_color("\nPhysical Memory Information\n",
+                   VGA_LIGHT_CYAN, VGA_BLACK);
+
+    vga_puts("--------------------------------\n");
+
+    vga_puts("Total: ");
+    k_print_uint(total * 4);
+    vga_puts(" KB\n");
+
+    vga_puts("Used : ");
+    k_print_uint(used * 4);
+    vga_puts(" KB\n");
+
+    vga_puts("Free : ");
+    k_print_uint(free * 4);
+    vga_puts(" KB\n\n");
+}
 
 
 
@@ -325,6 +355,8 @@ static void shell_run(void) {
         if (k_strcmp(cmd, "clear") == 0) { cmd_clear(); continue; }
         if (k_strcmp(cmd, "about") == 0) { cmd_about(); continue; }
         if (k_strcmp(cmd, "mem")   == 0) { cmd_mem();   continue; }
+        if (k_strcmp(cmd, "meminfo") == 0) { cmd_meminfo(); continue; }
+
 
         if (k_strncmp(cmd, "echo ", 5) == 0) {
             cmd_echo(k_ltrim(cmd + 5));
@@ -396,6 +428,7 @@ void kernel_main(void) {
     vga_init();
     kb_init();
     process_init();
+    pmm_init();
 
 process_create(process_one);
 process_create(process_two);
