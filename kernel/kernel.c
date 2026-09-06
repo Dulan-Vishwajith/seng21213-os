@@ -430,6 +430,11 @@ void kernel_main(void) {
     process_init();
     pmm_init();
 
+
+
+
+
+
 process_create(process_one);
 process_create(process_two);
 

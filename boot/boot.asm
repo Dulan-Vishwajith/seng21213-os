@@ -51,6 +51,10 @@ load_kernel:
     mov  si, msg_ok
     call print_rm
 
+
+call detect_memory
+
+
 ; ---------------------------------------------------------------------------
 ; Enter Protected Mode
 ; ---------------------------------------------------------------------------
@@ -87,6 +91,39 @@ init_pm32:
 
     ; Should never return, but halt if it does
     hlt
+
+
+[BITS 16]
+detect_memory:
+    xor ax, ax
+    mov es, ax
+
+    mov di, 0x8004
+    xor ebx, ebx
+    xor bp, bp
+
+.e820_loop:
+    mov eax, 0xE820
+    mov ecx, 24
+    mov edx, 0x534D4150
+
+    int 0x15
+    jc .e820_done
+
+    inc bp
+    add di, 24
+
+    test ebx, ebx
+    jnz .e820_loop
+
+.e820_done:
+    mov [0x8000], bp
+    ret
+
+
+
+
+
 
 ; ---------------------------------------------------------------------------
 ; Error handlers
@@ -126,6 +163,9 @@ msg_load    db '  [BOOT] Loading kernel...', 13, 10, 0
 msg_ok      db '  [BOOT] Kernel loaded OK ', 13, 10, 0
 msg_err     db '  [BOOT] DISK ERROR!       ', 13, 10, 0
 msg_halt    db '  System halted.           ', 13, 10, 0
+
+
+
 
 ; ---------------------------------------------------------------------------
 ; GDT – Global Descriptor Table

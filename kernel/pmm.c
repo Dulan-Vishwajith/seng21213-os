@@ -9,7 +9,22 @@
 static uint32_t bitmap[BITMAP_SIZE];
 
 static uint32_t total_frames;
+
 static uint32_t free_frames;
+
+
+
+
+typedef struct {
+    uint64_t base;
+    uint64_t length;
+    uint32_t type;
+    uint32_t acpi;
+} __attribute__((packed)) e820_entry_t;
+
+
+
+
 
 /* Set a frame as used */
 static void bitmap_set(uint32_t frame)
@@ -29,29 +44,72 @@ static int bitmap_test(uint32_t frame)
     return (bitmap[frame / 32] >> (frame % 32)) & 1;
 }
 
+
+
+
 void pmm_init(void)
 {
-    /* Start by marking all frames as used */
+    /* Start with every frame marked as used */
     memset(bitmap, 0xFF, sizeof(bitmap));
 
     total_frames = TOTAL_FRAMES;
     free_frames = 0;
 
-    /*
-     * Temporarily make memory above 1 MB available.
-     * We will improve this later using the E820 memory map.
-     */
+    /* E820 information written by the bootloader */
+    uint16_t count = *(uint16_t *)0x8000;
+    e820_entry_t *map = (e820_entry_t *)0x8004;
 
-    for (uint32_t address = 0x100000;
-         address < MAX_MEMORY;
-         address += FRAME_SIZE)
+    for (uint16_t i = 0; i < count; i++)
     {
-        uint32_t frame = address / FRAME_SIZE;
+        /* Type 1 means usable RAM */
+        if (map[i].type != 1)
+        {
+            continue;
+        }
 
-        bitmap_clear(frame);
-        free_frames++;
+        uint32_t start = (uint32_t)map[i].base;
+        uint32_t length = (uint32_t)map[i].length;
+        uint32_t end = start + length;
+
+        /* Do not manage memory outside our 32 MB bitmap */
+        if (start >= MAX_MEMORY)
+        {
+            continue;
+        }
+
+        if (end > MAX_MEMORY || end < start)
+        {
+            end = MAX_MEMORY;
+        }
+
+        /* Keep the first 1 MB reserved */
+        if (start < 0x100000)
+        {
+            start = 0x100000;
+        }
+
+        /* Align start to the next 4 KB frame */
+        start = (start + FRAME_SIZE - 1) & ~(FRAME_SIZE - 1);
+
+        for (uint32_t address = start;
+             address + FRAME_SIZE <= end;
+             address += FRAME_SIZE)
+        {
+            uint32_t frame = address / FRAME_SIZE;
+
+            if (bitmap_test(frame))
+            {
+                bitmap_clear(frame);
+                free_frames++;
+            }
+        }
     }
 }
+
+
+
+
+
 
 uint32_t pmm_alloc_frame(void)
 {
