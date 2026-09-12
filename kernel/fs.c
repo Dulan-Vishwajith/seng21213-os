@@ -2,8 +2,211 @@
 #include "ramdisk.h"
 
 
+
+
 static file_t file_table[MAX_FDS];
 
+static int clear_block(uint32_t block);
+
+
+
+
+/*
+ * Read the filesystem superblock.
+ */
+static int read_superblock(superblock_t *sb)
+{
+    uint8_t buffer[BLOCK_SIZE];
+    uint8_t *source;
+    uint8_t *destination;
+    uint32_t i;
+
+    if (sb == NULL) {
+        return -1;
+    }
+
+    if (ramdisk_read(FS_SUPERBLOCK_BLOCK, buffer) != 0) {
+        return -1;
+    }
+
+    source = buffer;
+    destination = (uint8_t *)sb;
+
+    for (i = 0; i < sizeof(superblock_t); i++) {
+        destination[i] = source[i];
+    }
+
+    return 0;
+}
+
+/*
+ * Write the filesystem superblock.
+ */
+static int update_superblock(const superblock_t *sb)
+{
+    uint8_t buffer[BLOCK_SIZE];
+    uint8_t *source;
+    uint8_t *destination;
+    uint32_t i;
+
+    if (sb == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < BLOCK_SIZE; i++) {
+        buffer[i] = 0;
+    }
+
+    source = (uint8_t *)sb;
+    destination = buffer;
+
+    for (i = 0; i < sizeof(superblock_t); i++) {
+        destination[i] = source[i];
+    }
+
+    return ramdisk_write(FS_SUPERBLOCK_BLOCK, buffer);
+}
+
+/*
+ * Test a data-block bitmap bit.
+ */
+static int data_bitmap_test(const uint8_t *bitmap, uint32_t block)
+{
+    uint32_t byte;
+    uint32_t bit;
+
+    byte = block / 8;
+    bit = block % 8;
+
+    return (bitmap[byte] & (1U << bit)) != 0;
+}
+
+/*
+ * Set a data-block bitmap bit.
+ */
+static void data_bitmap_set(uint8_t *bitmap, uint32_t block)
+{
+    uint32_t byte;
+    uint32_t bit;
+
+    byte = block / 8;
+    bit = block % 8;
+
+    bitmap[byte] |= (uint8_t)(1U << bit);
+}
+
+/*
+ * Clear a data-block bitmap bit.
+ */
+static void data_bitmap_clear(uint8_t *bitmap, uint32_t block)
+{
+    uint32_t byte;
+    uint32_t bit;
+
+    byte = block / 8;
+    bit = block % 8;
+
+    bitmap[byte] &= (uint8_t)~(1U << bit);
+}
+
+/*
+ * Allocate one data block.
+ *
+ * Returns the data-block index, or -1 if none is available.
+ *
+ * The returned index is relative to FS_DATA_BLOCK.
+ */
+static int data_block_alloc(void)
+{
+    uint8_t bitmap[BLOCK_SIZE];
+    superblock_t sb;
+    uint32_t i;
+
+    if (ramdisk_read(FS_BLOCK_BITMAP_BLOCK, bitmap) != 0) {
+        return -1;
+    }
+
+    if (read_superblock(&sb) != 0) {
+        return -1;
+    }
+
+    for (i = 0; i < FS_DATA_BLOCK_COUNT; i++) {
+
+        if (!data_bitmap_test(bitmap, i)) {
+
+            data_bitmap_set(bitmap, i);
+
+            if (ramdisk_write(FS_BLOCK_BITMAP_BLOCK, bitmap) != 0) {
+                return -1;
+            }
+
+            if (sb.free_blocks > 0) {
+                sb.free_blocks--;
+            }
+
+            if (update_superblock(&sb) != 0) {
+                /*
+                 * Roll back bitmap allocation.
+                 */
+                data_bitmap_clear(bitmap, i);
+                ramdisk_write(FS_BLOCK_BITMAP_BLOCK, bitmap);
+                return -1;
+            }
+
+            /*
+             * Clear the newly allocated block.
+             */
+            if (clear_block(FS_DATA_BLOCK + i) != 0) {
+                data_bitmap_clear(bitmap, i);
+                ramdisk_write(FS_BLOCK_BITMAP_BLOCK, bitmap);
+
+                sb.free_blocks++;
+                update_superblock(&sb);
+
+                return -1;
+            }
+
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+/*
+ * Free one data block.
+ */
+static int data_block_free(uint32_t block)
+{
+    uint8_t bitmap[BLOCK_SIZE];
+    superblock_t sb;
+
+    if (block >= FS_DATA_BLOCK_COUNT) {
+        return -1;
+    }
+
+    if (ramdisk_read(FS_BLOCK_BITMAP_BLOCK, bitmap) != 0) {
+        return -1;
+    }
+
+    if (!data_bitmap_test(bitmap, block)) {
+        return -1;
+    }
+
+    data_bitmap_clear(bitmap, block);
+
+    if (ramdisk_write(FS_BLOCK_BITMAP_BLOCK, bitmap) != 0) {
+        return -1;
+    }
+
+    if (read_superblock(&sb) != 0) {
+        return -1;
+    }
+
+    sb.free_blocks++;
+
+    return update_superblock(&sb);
+}
 
 
 
@@ -546,18 +749,31 @@ int fs_open(const char *name, int flags)
          * Data block freeing will be implemented
          * in a later step.
          */
-        if (flags & O_TRUNC) {
-            inode.size = 0;
-            inode.block_count = 0;
 
-            for (i = 0; i < INODE_DIRECT; i++) {
-                inode.blocks[i] = 0;
-            }
 
-            if (inode_write((uint32_t)inode_number, &inode) != 0) {
-                return -1;
-            }
-        }
+
+
+if (flags & O_TRUNC) {
+
+    /*
+     * Return all allocated data blocks.
+     */
+    for (i = 0; i < inode.block_count; i++) {
+        data_block_free(inode.blocks[i]);
+        inode.blocks[i] = 0;
+    }
+
+    inode.size = 0;
+    inode.block_count = 0;
+
+    if (inode_write((uint32_t)inode_number, &inode) != 0) {
+        return -1;
+    }
+}
+ 
+
+
+
     }
 
     /*
@@ -594,13 +810,160 @@ int fs_read(int fd, void *buf, int n)
     return -1;
 }
 
+
+
+
+
 int fs_write(int fd, const void *buf, int n)
 {
-    (void)fd;
-    (void)buf;
-    (void)n;
-    return -1;
+    inode_t inode;
+    uint32_t position;
+    uint32_t end_position;
+    uint32_t first_block;
+    uint32_t last_block;
+    uint32_t required_blocks;
+    uint32_t block_index;
+    uint32_t block_offset;
+    uint32_t remaining;
+    uint32_t chunk;
+    uint32_t source_offset;
+    uint32_t i;
+    uint8_t block_buffer[BLOCK_SIZE];
+    const uint8_t *source;
+
+    if (fd < 0 || fd >= MAX_FDS) {
+        return -1;
+    }
+
+    if (!file_table[fd].used) {
+        return -1;
+    }
+
+    if (!(file_table[fd].flags & O_WRONLY)) {
+        return -1;
+    }
+
+    if (buf == NULL || n <= 0) {
+        return -1;
+    }
+
+    /*
+     * Maximum file size is:
+     * 8 direct blocks × 512 bytes = 4096 bytes.
+     */
+    position = file_table[fd].position;
+    end_position = position + (uint32_t)n;
+
+    if (end_position > INODE_DIRECT * BLOCK_SIZE) {
+        return -1;
+    }
+
+    if (inode_read(file_table[fd].inode_number, &inode) != 0) {
+        return -1;
+    }
+
+    /*
+     * Calculate the required number of blocks.
+     */
+    if (end_position == 0) {
+        required_blocks = 0;
+    } else {
+        required_blocks =
+            (end_position + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    }
+
+    /*
+     * Allocate any additional blocks needed.
+     */
+    while (inode.block_count < required_blocks) {
+
+        int new_block;
+
+        new_block = data_block_alloc();
+
+        if (new_block < 0) {
+            return -1;
+        }
+
+        inode.blocks[inode.block_count] = (uint32_t)new_block;
+        inode.block_count++;
+    }
+
+    /*
+     * Write the data block by block.
+     */
+    source = (const uint8_t *)buf;
+    source_offset = 0;
+    remaining = (uint32_t)n;
+
+    first_block = position / BLOCK_SIZE;
+    last_block = (end_position - 1) / BLOCK_SIZE;
+
+    for (block_index = first_block;
+         block_index <= last_block;
+         block_index++) {
+
+        block_offset = 0;
+
+        if (block_index == first_block) {
+            block_offset = position % BLOCK_SIZE;
+        }
+
+        /*
+         * Read the existing block first so that writing
+         * part of a block does not destroy existing data.
+         */
+        if (ramdisk_read(
+                FS_DATA_BLOCK + inode.blocks[block_index],
+                block_buffer) != 0) {
+            return -1;
+        }
+
+        chunk = BLOCK_SIZE - block_offset;
+
+        if (chunk > remaining) {
+            chunk = remaining;
+        }
+
+        for (i = 0; i < chunk; i++) {
+            block_buffer[block_offset + i] =
+                source[source_offset + i];
+        }
+
+        if (ramdisk_write(
+                FS_DATA_BLOCK + inode.blocks[block_index],
+                block_buffer) != 0) {
+            return -1;
+        }
+
+        source_offset += chunk;
+        remaining -= chunk;
+    }
+
+    /*
+     * Update file size.
+     */
+    if (end_position > inode.size) {
+        inode.size = end_position;
+    }
+
+    /*
+     * Move file position forward.
+     */
+    file_table[fd].position = end_position;
+
+    /*
+     * Save inode.
+     */
+    if (inode_write(file_table[fd].inode_number, &inode) != 0) {
+        return -1;
+    }
+
+    return n;
 }
+
+
+
 
 
 
