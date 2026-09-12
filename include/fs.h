@@ -13,6 +13,28 @@
 #define INODE_DIRECT    8
 
 /*
+ * RAM disk layout
+ *
+ * Block 0       : Superblock
+ * Block 1       : Inode bitmap
+ * Block 2       : Block bitmap
+ * Blocks 3-514  : Inode table
+ * Blocks 515-2047: Data blocks
+ */
+
+#define FS_SUPERBLOCK_BLOCK       0
+#define FS_INODE_BITMAP_BLOCK     1
+#define FS_BLOCK_BITMAP_BLOCK     2
+#define FS_INODE_TABLE_BLOCK      3
+#define FS_DATA_BLOCK             515
+
+#define FS_INODE_TABLE_OFFSET     0x600
+#define FS_DATA_OFFSET            0x40600
+
+#define FS_TOTAL_BLOCKS           2048
+#define FS_DATA_BLOCK_COUNT       1533
+
+/*
  * File types
  */
 #define INODE_FREE      0
@@ -29,8 +51,6 @@
 
 /*
  * Superblock
- *
- * Stored at RAM disk offset 0x000.
  */
 typedef struct {
     uint32_t magic;
@@ -44,8 +64,6 @@ typedef struct {
 
 /*
  * Inode
- *
- * Each inode is 256 bytes.
  */
 typedef struct {
     uint32_t size;

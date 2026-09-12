@@ -31,6 +31,7 @@
 #include "semaphore.h"
 #include "pmm.h"
 #include "ramdisk.h"
+#include "fs.h"
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
@@ -431,7 +432,7 @@ void kernel_main(void) {
     process_init();
     pmm_init();
     ramdisk_init();
-
+    fs_init();
 
 
 
