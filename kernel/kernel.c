@@ -44,6 +44,13 @@ static void cmd_meminfo(void);
 static void cmd_ps(void);
 static void cmd_kill(const char *args);
 static void cmd_sched(void);
+static void cmd_ls(void);
+static void cmd_touch(const char *args);
+static void cmd_write(const char *args);
+static void cmd_cat(const char *args);
+static void cmd_rm(const char *args);
+
+
 
 /* ---------------------------------------------------------------------------
  * Utility: minimal string helpers (no libc in a freestanding kernel!)
@@ -334,6 +341,321 @@ static void cmd_kill(const char *args) {
 
 
 
+
+
+
+static void cmd_ls(void)
+{
+    inode_t entries[32];
+    int count;
+    int i;
+
+    count = fs_ls(entries, 32);
+
+    if (count < 0) {
+        vga_puts_color(
+            "  ls: filesystem error\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    if (count == 0) {
+        vga_puts("  No files.\n");
+        return;
+    }
+
+    vga_puts_color(
+        "\n  NAME                         SIZE\n",
+        VGA_LIGHT_CYAN,
+        VGA_BLACK
+    );
+
+    vga_puts("  -----------------------------------\n");
+
+    for (i = 0; i < count; i++) {
+        vga_puts("  ");
+        vga_puts(entries[i].name);
+
+        vga_puts("                         ");
+
+        k_print_uint(entries[i].size);
+
+        vga_puts(" bytes\n");
+    }
+
+    vga_puts("\n");
+}
+
+
+
+
+
+
+
+
+
+static void cmd_touch(const char *args)
+{
+    int fd;
+    const char *name;
+
+    name = k_ltrim(args);
+
+    if (k_strlen(name) == 0) {
+        vga_puts_color(
+            "  Usage: touch <filename>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * Create the file if it does not exist.
+     */
+    fd = fs_open(name, O_WRONLY | O_CREAT);
+
+    if (fd < 0) {
+        vga_puts_color(
+            "  touch: failed to create file\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    fs_close(fd);
+
+    vga_puts_color(
+        "  File created.\n",
+        VGA_LIGHT_GREEN,
+        VGA_BLACK
+    );
+}
+
+
+
+
+
+
+
+static void cmd_write(const char *args)
+{
+    char filename[28];
+    const char *p;
+    const char *text;
+    int fd;
+    int i;
+    int written;
+
+    p = k_ltrim(args);
+
+    if (k_strlen(p) == 0) {
+        vga_puts_color(
+            "  Usage: write <filename> <text>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * Extract filename.
+     */
+    i = 0;
+
+    while (*p != '\0' && *p != ' ' && i < 27) {
+        filename[i] = *p;
+        i++;
+        p++;
+    }
+
+    filename[i] = '\0';
+
+    /*
+     * Filename too long.
+     */
+    if (*p != '\0' && *p != ' ') {
+        vga_puts_color(
+            "  write: filename too long\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * Skip spaces before the text.
+     */
+    while (*p == ' ') {
+        p++;
+    }
+
+    text = p;
+
+    if (k_strlen(text) == 0) {
+        vga_puts_color(
+            "  Usage: write <filename> <text>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    /*
+     * Open existing file or create it.
+     *
+     * O_TRUNC makes this command replace old contents.
+     */
+    fd = fs_open(
+        filename,
+        O_WRONLY | O_CREAT | O_TRUNC
+    );
+
+    if (fd < 0) {
+        vga_puts_color(
+            "  write: failed to open file\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    written = fs_write(
+        fd,
+        text,
+        (int)k_strlen(text)
+    );
+
+    fs_close(fd);
+
+    if (written < 0) {
+        vga_puts_color(
+            "  write: failed\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    vga_puts_color(
+        "  File written successfully.\n",
+        VGA_LIGHT_GREEN,
+        VGA_BLACK
+    );
+}
+
+
+
+
+static void cmd_cat(const char *args)
+{
+    static char buffer[INODE_DIRECT * BLOCK_SIZE + 1];
+
+    const char *name;
+    int fd;
+    int bytes;
+    int i;
+
+    name = k_ltrim(args);
+
+    if (k_strlen(name) == 0) {
+        vga_puts_color(
+            "  Usage: cat <filename>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    fd = fs_open(name, O_RDONLY);
+
+    if (fd < 0) {
+        vga_puts_color(
+            "  cat: file not found\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    bytes = fs_read(
+        fd,
+        buffer,
+        INODE_DIRECT * BLOCK_SIZE
+    );
+
+    fs_close(fd);
+
+    if (bytes < 0) {
+        vga_puts_color(
+            "  cat: read error\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    buffer[bytes] = '\0';
+
+    vga_puts("  ");
+    
+    for (i = 0; i < bytes; i++) {
+        vga_putchar(buffer[i]);
+    }
+
+    vga_puts("\n");
+}
+
+
+
+
+
+
+
+static void cmd_rm(const char *args)
+{
+    const char *name;
+
+    name = k_ltrim(args);
+
+    if (k_strlen(name) == 0) {
+        vga_puts_color(
+            "  Usage: rm <filename>\n",
+            VGA_YELLOW,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    if (fs_unlink(name) != 0) {
+        vga_puts_color(
+            "  rm: file not found or delete failed\n",
+            VGA_LIGHT_RED,
+            VGA_BLACK
+        );
+        return;
+    }
+
+    vga_puts_color(
+        "  File deleted.\n",
+        VGA_LIGHT_GREEN,
+        VGA_BLACK
+    );
+}
+
+
+
+
+
+
+
+
+
+
+
 /* ---------------------------------------------------------------------------
  * Shell process
  * --------------------------------------------------------------------------*/
@@ -382,17 +704,33 @@ if (k_strcmp(cmd, "sched") == 0) {
 }
 
 
+if (k_strcmp(cmd, "ls") == 0) {
+    cmd_ls();
+    continue;
+}
 
-        /* Milestone stubs */
-        if (k_strcmp(cmd, "threads") == 0 ||
-            k_strcmp(cmd, "free")    == 0 ||
-            k_strcmp(cmd, "ls")      == 0 ||
-            k_strcmp(cmd, "cat")     == 0) {
-            vga_puts_color("  [TODO] This command is not yet implemented.\n",
-                           VGA_YELLOW, VGA_BLACK);
-            vga_puts("  Implement it as part of your lecture assignment.\n");
-            continue;
-        }
+if (k_strncmp(cmd, "touch ", 6) == 0) {
+    cmd_touch(cmd + 6);
+    continue;
+}
+
+if (k_strncmp(cmd, "write ", 6) == 0) {
+    cmd_write(cmd + 6);
+    continue;
+}
+
+if (k_strncmp(cmd, "cat ", 4) == 0) {
+    cmd_cat(cmd + 4);
+    continue;
+}
+
+if (k_strncmp(cmd, "rm ", 3) == 0) {
+    cmd_rm(cmd + 3);
+    continue;
+}
+
+
+
 
         vga_puts_color("  Unknown command: ", VGA_LIGHT_RED, VGA_BLACK);
         vga_puts(cmd);
