@@ -49,6 +49,19 @@
 #define O_CREAT         0x04
 #define O_TRUNC         0x08
 
+
+#define MAX_FDS         16
+
+typedef struct {
+    uint8_t  used;
+    uint8_t  flags;
+    uint16_t reserved;
+    uint32_t inode_number;
+    uint32_t position;
+} file_t;
+
+
+
 /*
  * Superblock
  */
