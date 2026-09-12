@@ -1102,11 +1102,66 @@ void fs_close(int fd)
     free_fd(fd);
 }
 
+
+
+
+
+
+
 int fs_unlink(const char *name)
 {
-    (void)name;
-    return -1;
+    int inode_number;
+    inode_t inode;
+    uint32_t i;
+
+    /*
+     * Validate filename.
+     */
+    if (name == NULL || name[0] == '\0') {
+        return -1;
+    }
+
+    /*
+     * Find the inode belonging to the file.
+     */
+    inode_number = find_inode(name);
+
+    if (inode_number < 0) {
+        return -1;
+    }
+
+    /*
+     * Read the inode.
+     */
+    if (inode_read((uint32_t)inode_number, &inode) != 0) {
+        return -1;
+    }
+
+    /*
+     * Free every data block belonging to the file.
+     */
+    for (i = 0; i < inode.block_count; i++) {
+
+        if (data_block_free(inode.blocks[i]) != 0) {
+            return -1;
+        }
+    }
+
+    /*
+     * Finally free the inode itself.
+     */
+    if (inode_free((uint32_t)inode_number) != 0) {
+        return -1;
+    }
+
+    return 0;
 }
+
+
+
+
+
+
 
 int fs_ls(inode_t *out, int max)
 {
