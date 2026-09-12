@@ -799,16 +799,137 @@ if (flags & O_TRUNC) {
 
 
 
-
-
-
 int fs_read(int fd, void *buf, int n)
 {
-    (void)fd;
-    (void)buf;
-    (void)n;
-    return -1;
+    inode_t inode;
+    uint32_t position;
+    uint32_t available;
+    uint32_t to_read;
+    uint32_t block_index;
+    uint32_t block_offset;
+    uint32_t remaining;
+    uint32_t destination_offset;
+    uint32_t chunk;
+    uint32_t i;
+    uint8_t block_buffer[BLOCK_SIZE];
+    uint8_t *destination;
+
+    /*
+     * Validate file descriptor.
+     */
+    if (fd < 0 || fd >= MAX_FDS) {
+        return -1;
+    }
+
+    if (!file_table[fd].used) {
+        return -1;
+    }
+
+    /*
+     * File must be opened for reading.
+     */
+    if (!(file_table[fd].flags & O_RDONLY)) {
+        return -1;
+    }
+
+    if (buf == NULL || n <= 0) {
+        return -1;
+    }
+
+    /*
+     * Read the inode.
+     */
+    if (inode_read(file_table[fd].inode_number, &inode) != 0) {
+        return -1;
+    }
+
+    /*
+     * Current position is stored in the file descriptor.
+     */
+    position = file_table[fd].position;
+
+    /*
+     * If we are already at or beyond EOF,
+     * there is nothing to read.
+     */
+    if (position >= inode.size) {
+        return 0;
+    }
+
+    /*
+     * Calculate how many bytes are actually available.
+     */
+    available = inode.size - position;
+
+    to_read = (uint32_t)n;
+
+    if (to_read > available) {
+        to_read = available;
+    }
+
+    destination = (uint8_t *)buf;
+
+    remaining = to_read;
+    destination_offset = 0;
+
+    /*
+     * Read one data block at a time.
+     */
+    while (remaining > 0) {
+
+        block_index = position / BLOCK_SIZE;
+        block_offset = position % BLOCK_SIZE;
+
+        /*
+         * Make sure the inode contains the required
+         * direct block.
+         */
+        if (block_index >= inode.block_count ||
+            block_index >= INODE_DIRECT) {
+            return -1;
+        }
+
+        /*
+         * Read the complete RAM-disk block.
+         */
+        if (ramdisk_read(
+                FS_DATA_BLOCK + inode.blocks[block_index],
+                block_buffer) != 0) {
+            return -1;
+        }
+
+        /*
+         * Determine how much data to copy from
+         * this block.
+         */
+        chunk = BLOCK_SIZE - block_offset;
+
+        if (chunk > remaining) {
+            chunk = remaining;
+        }
+
+        /*
+         * Copy data to the user's buffer.
+         */
+        for (i = 0; i < chunk; i++) {
+            destination[destination_offset + i] =
+                block_buffer[block_offset + i];
+        }
+
+        position += chunk;
+        destination_offset += chunk;
+        remaining -= chunk;
+    }
+
+    /*
+     * Update the file position.
+     */
+    file_table[fd].position = position;
+
+    return (int)to_read;
 }
+
+
 
 
 
