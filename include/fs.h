@@ -62,16 +62,28 @@ typedef struct {
     uint32_t data_off;
 } superblock_t;
 
+
 /*
  * Inode
  */
+
 typedef struct {
     uint32_t size;
     uint32_t blocks[INODE_DIRECT];
     uint32_t block_count;
     uint8_t  type;
     char     name[28];
+
+    /*
+     * Padding so every inode is exactly 256 bytes.
+     */
+    uint8_t  reserved[187];
 } inode_t;
+
+
+
+
+
 
 /*
  * File System API
