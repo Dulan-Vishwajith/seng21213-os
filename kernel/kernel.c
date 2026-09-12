@@ -30,6 +30,7 @@
 #include "mutex.h"
 #include "semaphore.h"
 #include "pmm.h"
+#include "ramdisk.h"
 /* ---------------------------------------------------------------------------
  * Forward declarations of shell commands
  * --------------------------------------------------------------------------*/
@@ -429,7 +430,7 @@ void kernel_main(void) {
     kb_init();
     process_init();
     pmm_init();
-
+    ramdisk_init();
 
 
 
