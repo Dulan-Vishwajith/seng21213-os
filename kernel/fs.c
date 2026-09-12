@@ -1163,9 +1163,70 @@ int fs_unlink(const char *name)
 
 
 
+
+
 int fs_ls(inode_t *out, int max)
 {
-    (void)out;
-    (void)max;
-    return 0;
+    uint8_t bitmap[BLOCK_SIZE];
+    inode_t inode;
+    int count;
+    uint32_t i;
+
+    /*
+     * Validate output buffer and maximum number of entries.
+     */
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+
+    /*
+     * Read inode bitmap.
+     */
+    if (read_inode_bitmap(bitmap) != 0) {
+        return -1;
+    }
+
+    count = 0;
+
+    /*
+     * Scan all inodes.
+     */
+    for (i = 0; i < MAX_INODES; i++) {
+
+        /*
+         * Skip free inodes.
+         */
+        if (!inode_bitmap_test(bitmap, i)) {
+            continue;
+        }
+
+        /*
+         * Read the allocated inode.
+         */
+        if (inode_read(i, &inode) != 0) {
+            continue;
+        }
+
+        /*
+         * Only return regular files.
+         */
+        if (inode.type != INODE_FILE) {
+            continue;
+        }
+
+        /*
+         * Stop when the caller's buffer is full.
+         */
+        if (count >= max) {
+            break;
+        }
+
+        /*
+         * Copy the inode to the output array.
+         */
+        out[count] = inode;
+        count++;
+    }
+
+    return count;
 }
